@@ -23,8 +23,8 @@
                     <ul class="list-unstyled">
                         <li class="mb-2"><a href="index.php" class="text-muted text-decoration-none">Home</a></li>
                         <li class="mb-2"><a href="index.php?page=category" class="text-muted text-decoration-none">Categories</a></li>
-                        <li class="mb-2"><a href="#" class="text-muted text-decoration-none">About Us</a></li>
-                        <li class="mb-2"><a href="#" class="text-muted text-decoration-none">Artist Profiles</a></li>
+                        <li class="mb-2"><a href="index.php?page=about" class="text-muted text-decoration-none">About Us</a></li>
+                        <li class="mb-2"><a href="index.php?page=category" class="text-muted text-decoration-none">Artist Profiles</a></li>
                         <li class="mb-2"><a href="#" class="text-muted text-decoration-none">Contact</a></li>
                     </ul>
                 </div>
@@ -80,6 +80,7 @@
     
     <!-- Bootstrap JS Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
     <!-- Custom JavaScript -->
     <script src="assets/js/main.js"></script>
 </body>
