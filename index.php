@@ -34,6 +34,9 @@ switch ($page) {
     case 'orders':
         include 'pages/orders.php';
         break;
+    case 'track_order':
+        include 'pages/track_order.php';
+        break;
     case 'login':
         include 'pages/login.php';
         break;

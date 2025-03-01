@@ -53,6 +53,35 @@ while ($related = mysqli_fetch_assoc($related_result)) {
 
 // Check if product was added to cart
 $added_to_cart = isset($_GET['added']) && $_GET['added'] == 1;
+
+// Handle Buy Now action
+if (isset($_POST['buy_now'])) {
+    $quantity = isset($_POST['quantity']) ? intval($_POST['quantity']) : 1;
+    
+    if ($quantity > 0 && $product_id > 0) {
+        // Clear current cart and add only this item
+        unset($_SESSION['cart']);
+        $_SESSION['cart'] = [];
+        
+        // Get artist name
+        $artist_query = "SELECT name FROM artists WHERE id = {$product['artist_id']}";
+        $artist_result = mysqli_query($conn, $artist_query);
+        $artist = mysqli_fetch_assoc($artist_result);
+        
+        $_SESSION['cart'][] = [
+            'id' => $product_id,
+            'title' => $product['title'],
+            'price' => $product['price'],
+            'image' => $product['image'],
+            'artist' => $artist['name'],
+            'quantity' => $quantity
+        ];
+        
+        // Redirect to checkout
+        header("Location: index.php?page=checkout");
+        exit;
+    }
+}
 ?>
 
 <div class="container py-5">
@@ -106,11 +135,10 @@ $added_to_cart = isset($_GET['added']) && $_GET['added'] == 1;
             </div>
             
             <!-- Add to Cart Form -->
-            <form method="POST" action="index.php?page=cart" class="mb-4">
-                <input type="hidden" name="action" value="add">
+            <form method="POST" action="" class="mb-4">
                 <input type="hidden" name="product_id" value="<?php echo $product_id; ?>">
                 
-                <div class="row align-items-center">
+                <div class="row align-items-center mb-3">
                     <div class="col-md-4 mb-3 mb-md-0">
                         <label for="quantity" class="form-label">Quantity</label>
                         <div class="input-group">
@@ -123,12 +151,18 @@ $added_to_cart = isset($_GET['added']) && $_GET['added'] == 1;
                             </button>
                         </div>
                     </div>
+                </div>
+                
+                <div class="d-flex gap-2">
+                    <!-- Add to Cart Button -->
+                    <button type="submit" formaction="index.php?page=cart" name="action" value="add" class="btn btn-outline-primary flex-grow-1" <?php echo !$product['in_stock'] ? 'disabled' : ''; ?>>
+                        <i class="fas fa-shopping-cart me-2"></i>Add to Cart
+                    </button>
                     
-                    <div class="col-md-8">
-                        <button type="submit" class="btn btn-primary w-100" <?php echo !$product['in_stock'] ? 'disabled' : ''; ?>>
-                            <i class="fas fa-shopping-cart me-2"></i>Add to Cart
-                        </button>
-                    </div>
+                    <!-- Buy Now Button -->
+                    <button type="submit" name="buy_now" class="btn btn-primary flex-grow-1" <?php echo !$product['in_stock'] ? 'disabled' : ''; ?>>
+                        <i class="fas fa-bolt me-2"></i>Buy Now
+                    </button>
                 </div>
             </form>
             

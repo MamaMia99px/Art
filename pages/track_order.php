@@ -1,80 +1,158 @@
 <?php
 // Check if order ID is provided
 $order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
+$order_number = isset($_GET['order_number']) ? $_GET['order_number'] : '';
 
-if ($order_id <= 0) {
-    header('Location: index.php');
-    exit;
-}
+// If neither order ID nor order number is provided, show the tracking form
+$show_form = ($order_id <= 0 && empty($order_number));
 
-// Check if user is logged in and the order belongs to them
-if (!isset($_SESSION['user_id'])) {
-    header('Location: index.php?page=login');
-    exit;
-}
-
-$user_id = $_SESSION['user_id'];
-
-// Fetch order details
-$order_query = "SELECT o.*, a.full_name, a.phone, a.address_line1, a.address_line2, a.city, a.province, a.postal_code, 
-               p.reference_number, p.account_number 
-               FROM orders o 
-               JOIN user_addresses a ON o.shipping_address_id = a.id 
-               LEFT JOIN payments p ON o.id = p.order_id 
-               WHERE o.id = $order_id AND o.user_id = $user_id";
-$order_result = mysqli_query($conn, $order_query);
-
-if (mysqli_num_rows($order_result) === 0) {
-    // Order not found or doesn't belong to user
-    header('Location: index.php');
-    exit;
-}
-
-$order = mysqli_fetch_assoc($order_result);
-
-// Fetch order items
-$items_query = "SELECT oi.*, p.title, p.image 
-               FROM order_items oi 
-               JOIN products p ON oi.product_id = p.id 
-               WHERE oi.order_id = $order_id";
-$items_result = mysqli_query($conn, $items_query);
+// Initialize variables
+$order = null;
 $order_items = [];
+$status_history = [];
+$error_message = '';
 
-while ($item = mysqli_fetch_assoc($items_result)) {
-    $order_items[] = $item;
+// Process form submission
+if (isset($_POST['track_order'])) {
+    $order_number = trim($_POST['order_number']);
+    $email = trim($_POST['email']);
+    
+    if (empty($order_number)) {
+        $error_message = 'Please enter an order number';
+    } elseif (empty($email)) {
+        $error_message = 'Please enter your email address';
+    } else {
+        // Sanitize inputs
+        $order_number = mysqli_real_escape_string($conn, $order_number);
+        $email = mysqli_real_escape_string($conn, $email);
+        
+        // Find the order
+        $order_query = "SELECT o.* FROM orders o 
+                       JOIN users u ON o.user_id = u.id 
+                       WHERE o.order_number = '$order_number' AND u.email = '$email'";
+        $order_result = mysqli_query($conn, $order_query);
+        
+        if (mysqli_num_rows($order_result) > 0) {
+            $order = mysqli_fetch_assoc($order_result);
+            $order_id = $order['id'];
+            $show_form = false;
+            
+            // Redirect to the tracking page with the order ID
+            header("Location: index.php?page=track_order&order_id=$order_id");
+            exit;
+        } else {
+            $error_message = 'No order found with the provided details';
+        }
+    }
 }
 
-// Format order date
-$order_date = new DateTime($order['order_date']);
-$formatted_date = $order_date->format('F j, Y');
+// If order ID is provided, fetch order details
+if ($order_id > 0) {
+    // Fetch order details
+    $order_query = "SELECT o.*, a.full_name, a.phone, a.address_line1, a.address_line2, a.city, a.province, a.postal_code, 
+                   u.email as user_email, u.full_name as user_name,
+                   p.reference_number, p.account_number 
+                   FROM orders o 
+                   JOIN user_addresses a ON o.shipping_address_id = a.id 
+                   JOIN users u ON o.user_id = u.id 
+                   LEFT JOIN payments p ON o.id = p.order_id 
+                   WHERE o.id = $order_id";
+    $order_result = mysqli_query($conn, $order_query);
+    
+    if (mysqli_num_rows($order_result) > 0) {
+        $order = mysqli_fetch_assoc($order_result);
+        $show_form = false;
+        
+        // Fetch order items
+        $items_query = "SELECT oi.*, p.title, p.image 
+                       FROM order_items oi 
+                       JOIN products p ON oi.product_id = p.id 
+                       WHERE oi.order_id = $order_id";
+        $items_result = mysqli_query($conn, $items_query);
+        
+        while ($item = mysqli_fetch_assoc($items_result)) {
+            $order_items[] = $item;
+        }
+        
+        // Get order status history
+        $history_query = "SELECT * FROM order_status_history WHERE order_id = $order_id ORDER BY created_at ASC";
+        $history_result = mysqli_query($conn, $history_query);
+        
+        while ($history = mysqli_fetch_assoc($history_result)) {
+            $status_history[] = $history;
+        }
+    } else {
+        $error_message = 'Order not found';
+        $show_form = true;
+    }
+} elseif (!empty($order_number)) {
+    // If order number is provided, fetch order details
+    $order_number = mysqli_real_escape_string($conn, $order_number);
+    $order_query = "SELECT o.id FROM orders o WHERE o.order_number = '$order_number'";
+    $order_result = mysqli_query($conn, $order_query);
+    
+    if (mysqli_num_rows($order_result) > 0) {
+        $order_data = mysqli_fetch_assoc($order_result);
+        $order_id = $order_data['id'];
+        
+        // Redirect to the tracking page with the order ID
+        header("Location: index.php?page=track_order&order_id=$order_id");
+        exit;
+    } else {
+        $error_message = 'Order not found';
+        $show_form = true;
+    }
+}
 
-// Calculate estimated delivery date (5-7 days from order date)
-$delivery_date = clone $order_date;
-$delivery_date->modify('+5 days');
-$delivery_end_date = clone $order_date;
-$delivery_end_date->modify('+7 days');
-$delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->format('F j, Y');
-
-// Get order status history
-$history_query = "SELECT * FROM order_status_history WHERE order_id = $order_id ORDER BY created_at ASC";
-$history_result = mysqli_query($conn, $history_query);
-$status_history = [];
-
-while ($history = mysqli_fetch_assoc($history_result)) {
-    $status_history[] = $history;
+// Format order date if order exists
+if ($order) {
+    $order_date = new DateTime($order['order_date']);
+    $formatted_date = $order_date->format('F j, Y');
+    
+    // Calculate estimated delivery date
+    $delivery_date = clone $order_date;
+    $delivery_date->modify('+5 days');
+    $delivery_end_date = clone $order_date;
+    $delivery_end_date->modify('+7 days');
+    $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->format('F j, Y');
 }
 ?>
 
 <div class="container py-5">
-    <div class="text-center mb-5">
-        <div class="mb-4">
-            <i class="fas fa-check-circle text-success" style="font-size: 4rem;"></i>
-        </div>
-        <h1 class="h2 mb-2">Thank You for Your Order!</h1>
-        <p class="text-muted">Your order has been placed successfully.</p>
-    </div>
+    <h1 class="h2 mb-4">Track Your Order</h1>
     
+    <?php if ($show_form): ?>
     <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card">
+                <div class="card-body p-4">
+                    <?php if (!empty($error_message)): ?>
+                    <div class="alert alert-danger"><?php echo $error_message; ?></div>
+                    <?php endif; ?>
+                    
+                    <p class="text-muted mb-4">Enter your order number and email address to track your order status.</p>
+                    
+                    <form method="POST" action="">
+                        <div class="mb-3">
+                            <label for="order_number" class="form-label">Order Number</label>
+                            <input type="text" class="form-control" id="order_number" name="order_number" placeholder="e.g. ORD-20230615-1234" required>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label for="email" class="form-label">Email Address</label>
+                            <input type="email" class="form-control" id="email" name="email" placeholder="Enter the email used for the order" required>
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" name="track_order" class="btn btn-primary">Track Order</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php elseif ($order): ?>
+    <div class="row">
         <div class="col-lg-8">
             <!-- Order Information -->
             <div class="card mb-4">
@@ -124,7 +202,7 @@ while ($history = mysqli_fetch_assoc($history_result)) {
                             <p class="mb-0">
                                 <strong>Cash on Delivery</strong><br>
                                 Amount to pay: ₱<?php echo number_format($order['total_amount'], 2); ?><br>
-                                Status: <span class="badge bg-warning text-dark">Pay upon delivery</span>
+                                Status: <span class="badge bg-warning text-dark"><?php echo $order['payment_status'] === 'pending' ? 'Pay upon delivery' : 'Paid'; ?></span>
                             </p>
                             <?php endif; ?>
                         </div>
@@ -132,12 +210,42 @@ while ($history = mysqli_fetch_assoc($history_result)) {
                 </div>
             </div>
             
-            <!-- Order Status Timeline -->
+            <!-- Order Tracking Timeline -->
             <div class="card mb-4">
                 <div class="card-header bg-white">
                     <h5 class="mb-0">Order Status</h5>
                 </div>
                 <div class="card-body">
+                    <!-- Visual Tracking Progress -->
+                    <div class="mb-4">
+                        <?php 
+                        $status_steps = ['pending', 'processing', 'shipped', 'delivered'];
+                        $current_status = $order['status'];
+                        $current_step = array_search($current_status, $status_steps);
+                        if ($current_step === false) $current_step = -1; // For cancelled or other statuses
+                        ?>
+                        
+                        <div class="position-relative mb-4">
+                            <div class="progress" style="height: 4px;">
+                                <div class="progress-bar bg-primary" role="progressbar" style="width: <?php echo ($current_step >= 0) ? (($current_step + 1) / count($status_steps) * 100) : 0; ?>%" aria-valuenow="<?php echo ($current_step >= 0) ? (($current_step + 1) / count($status_steps) * 100) : 0; ?>" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                            
+                            <div class="d-flex justify-content-between position-relative" style="margin-top: -12px;">
+                                <?php foreach ($status_steps as $index => $step): ?>
+                                <div class="text-center" style="width: 100px; margin-left: <?php echo $index === 0 ? '0' : 'auto'; ?>; margin-right: <?php echo $index === count($status_steps) - 1 ? '0' : 'auto'; ?>">
+                                    <div class="<?php echo ($current_step >= $index) ? 'bg-primary' : 'bg-secondary'; ?> rounded-circle d-flex align-items-center justify-content-center mx-auto" style="width: 24px; height: 24px;">
+                                        <i class="fas fa-check text-white small"></i>
+                                    </div>
+                                    <div class="mt-2">
+                                        <span class="small <?php echo ($current_step >= $index) ? 'fw-bold' : 'text-muted'; ?>"><?php echo ucfirst($step); ?></span>
+                                    </div>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Detailed Timeline -->
                     <div class="position-relative">
                         <?php if (!empty($status_history)): ?>
                             <?php foreach ($status_history as $index => $status): ?>
@@ -234,9 +342,14 @@ while ($history = mysqli_fetch_assoc($history_result)) {
                     </div>
                 </div>
             </div>
-            
+        </div>
+        
+        <div class="col-lg-4">
             <!-- Order Summary -->
             <div class="card mb-4">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">Order Summary</h5>
+                </div>
                 <div class="card-body">
                     <div class="d-flex justify-content-between mb-2">
                         <span class="text-muted">Subtotal</span>
@@ -260,74 +373,46 @@ while ($history = mysqli_fetch_assoc($history_result)) {
                 </div>
             </div>
             
-            <!-- What's Next Section -->
+            <!-- Delivery Information -->
             <div class="card mb-4">
                 <div class="card-header bg-white">
-                    <h5 class="mb-0">What's Next?</h5>
+                    <h5 class="mb-0">Delivery Information</h5>
                 </div>
                 <div class="card-body">
-                    <div class="row text-center">
-                        <?php if ($order['payment_method'] === 'cod'): ?>
-                        <div class="col-md-3 mb-3 mb-md-0">
-                            <div class="mb-3">
-                                <i class="fas fa-box-open fa-3x <?php echo $order['status'] === 'pending' ? 'text-primary' : 'text-muted'; ?>"></i>
-                            </div>
-                            <h6>Order Received</h6>
-                            <p class="text-muted small">We've received your order</p>
-                        </div>
-                        <div class="col-md-3 mb-3 mb-md-0">
-                            <div class="mb-3">
-                                <i class="fas fa-clipboard-check fa-3x text-muted"></i>
-                            </div>
-                            <h6>Order Processing</h6>
-                            <p class="text-muted small">After payment confirmation</p>
-                        </div>
-                        <div class="col-md-3 mb-3 mb-md-0">
-                            <div class="mb-3">
-                                <i class="fas fa-shipping-fast fa-3x text-muted"></i>
-                            </div>
-                            <h6>Shipping</h6>
-                            <p class="text-muted small">Your order is on the way</p>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="mb-3">
-                                <i class="fas fa-hand-holding-usd fa-3x text-muted"></i>
-                            </div>
-                            <h6>Payment & Delivery</h6>
-                            <p class="text-muted small">Pay when you receive</p>
-                        </div>
-                        <?php else: ?>
-                        <div class="col-md-4 mb-3 mb-md-0">
-                            <div class="mb-3">
-                                <i class="fas fa-clipboard-check fa-3x <?php echo $order['status'] === 'processing' ? 'text-primary' : 'text-muted'; ?>"></i>
-                            </div>
-                            <h6>Order Processing</h6>
-                            <p class="text-muted small">We're preparing your order</p>
-                        </div>
-                        <div class="col-md-4 mb-3 mb-md-0">
-                            <div class="mb-3">
-                                <i class="fas fa-shipping-fast fa-3x text-muted"></i>
-                            </div>
-                            <h6>Shipping</h6>
-                            <p class="text-muted small">Your order will be shipped soon</p>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <i class="fas fa-box-open fa-3x text-muted"></i>
-                            </div>
-                            <h6>Delivery</h6>
-                            <p class="text-muted small">Estimated in 5-7 days</p>
-                        </div>
-                        <?php endif; ?>
+                    <?php if ($order['status'] === 'shipped' || $order['status'] === 'delivered'): ?>
+                    <div class="mb-3">
+                        <h6 class="text-muted mb-2">Tracking Number</h6>
+                        <p class="mb-0 fw-medium">TRK<?php echo str_pad(rand(1000, 9999), 8, '0', STR_PAD_LEFT); ?></p>
+                    </div>
+                    <?php endif; ?>
+                    
+                    <div class="mb-3">
+                        <h6 class="text-muted mb-2">Estimated Delivery</h6>
+                        <p class="mb-0"><?php echo $delivery_range; ?></p>
+                    </div>
+                    
+                    <div>
+                        <h6 class="text-muted mb-2">Shipping Method</h6>
+                        <p class="mb-0">Standard Shipping</p>
                     </div>
                 </div>
             </div>
             
-            <div class="text-center">
-                <a href="index.php?page=track_order&order_id=<?php echo $order_id; ?>" class="btn btn-primary me-2">Track Your Order</a>
-                <a href="index.php?page=orders" class="btn btn-outline-primary me-2">View All Orders</a>
-                <a href="index.php" class="btn btn-outline-secondary">Continue Shopping</a>
+            <!-- Need Help Section -->
+            <div class="card">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">Need Help?</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">If you have any questions or concerns about your order, please contact our customer support.</p>
+                    <div class="d-grid">
+                        <a href="#" class="btn btn-outline-primary">
+                            <i class="fas fa-headset me-2"></i>Contact Support
+                        </a>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
+    <?php endif; ?>
 </div>

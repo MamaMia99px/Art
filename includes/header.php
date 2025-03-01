@@ -92,6 +92,7 @@ if (isset($_SESSION['cart'])) {
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li><a class="dropdown-item" href="index.php?page=profile">My Profile</a></li>
                             <li><a class="dropdown-item" href="index.php?page=orders">My Orders</a></li>
+                            <li><a class="dropdown-item" href="index.php?page=track_order">Track Order</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="index.php?page=logout">Logout</a></li>
                         </ul>
@@ -99,6 +100,7 @@ if (isset($_SESSION['cart'])) {
                     <?php else: ?>
                     <a href="index.php?page=login" class="btn btn-primary me-2">Login</a>
                     <a href="index.php?page=register" class="btn btn-outline-primary">Register</a>
+                    <a href="index.php?page=track_order" class="btn btn-outline-secondary ms-2">Track Order</a>
                     <?php endif; ?>
                 </div>
             </div>
