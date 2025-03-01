@@ -1,205 +1,220 @@
 <?php
-// Initialize cart if not exists
-if (!isset($_SESSION['cart'])) {
-    $_SESSION['cart'] = [];
-}
-
 // Handle cart actions
-if (isset($_GET['action'])) {
-    $action = $_GET['action'];
-    $item_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+if (isset($_POST['action'])) {
+    $action = $_POST['action'];
     
-    // Remove item from cart
-    if ($action === 'remove' && $item_id > 0) {
-        foreach ($_SESSION['cart'] as $key => $item) {
-            if ($item['id'] == $item_id) {
-                unset($_SESSION['cart'][$key]);
-                // Reindex array
-                $_SESSION['cart'] = array_values($_SESSION['cart']);
-                break;
+    if ($action === 'add') {
+        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        $quantity = isset($_POST['quantity']) ? intval($_POST['quantity']) : 1;
+        
+        if ($product_id > 0) {
+            // Get product details
+            $product_query = "SELECT * FROM products WHERE id = $product_id";
+            $product_result = mysqli_query($conn, $product_query);
+            
+            if (mysqli_num_rows($product_result) > 0) {
+                $product = mysqli_fetch_assoc($product_result);
+                
+                // Initialize cart if not exists
+                if (!isset($_SESSION['cart'])) {
+                    $_SESSION['cart'] = [];
+                }
+                
+                // Check if product already in cart
+                $found = false;
+                foreach ($_SESSION['cart'] as $key => $item) {
+                    if ($item['id'] == $product_id) {
+                        $_SESSION['cart'][$key]['quantity'] += $quantity;
+                        $found = true;
+                        break;
+                    }
+                }
+                
+                // If product not in cart, add it
+                if (!$found) {
+                    // Get artist name
+                    $artist_query = "SELECT name FROM artists WHERE id = {$product['artist_id']}";
+                    $artist_result = mysqli_query($conn, $artist_query);
+                    $artist = mysqli_fetch_assoc($artist_result);
+                    
+                    $_SESSION['cart'][] = [
+                        'id' => $product_id,
+                        'title' => $product['title'],
+                        'price' => $product['price'],
+                        'image' => $product['image'],
+                        'artist' => $artist['name'],
+                        'quantity' => $quantity
+                    ];
+                }
+                
+                // Redirect back to product page with success message
+                header("Location: index.php?page=product&id=$product_id&added=1");
+                exit;
             }
         }
-        // Redirect to prevent refresh issues
-        header('Location: index.php?page=cart');
-        exit;
-    }
-    
-    // Update quantity
-    if ($action === 'update' && $item_id > 0 && isset($_GET['quantity'])) {
-        $quantity = intval($_GET['quantity']);
-        if ($quantity > 0) {
+    } elseif ($action === 'update') {
+        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        $quantity = isset($_POST['quantity']) ? intval($_POST['quantity']) : 1;
+        
+        if ($product_id > 0 && $quantity > 0) {
             foreach ($_SESSION['cart'] as $key => $item) {
-                if ($item['id'] == $item_id) {
+                if ($item['id'] == $product_id) {
                     $_SESSION['cart'][$key]['quantity'] = $quantity;
                     break;
                 }
             }
         }
-        // Return JSON response for AJAX requests
-        if (isset($_GET['ajax'])) {
-            // Calculate new totals
-            $subtotal = 0;
-            foreach ($_SESSION['cart'] as $item) {
-                $subtotal += $item['price'] * $item['quantity'];
+        
+        // Redirect back to cart
+        header("Location: index.php?page=cart");
+        exit;
+    } elseif ($action === 'remove') {
+        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        
+        if ($product_id > 0) {
+            foreach ($_SESSION['cart'] as $key => $item) {
+                if ($item['id'] == $product_id) {
+                    unset($_SESSION['cart'][$key]);
+                    // Re-index array
+                    $_SESSION['cart'] = array_values($_SESSION['cart']);
+                    break;
+                }
             }
-            $shipping = 250;
-            $tax = round($subtotal * 0.12); // 12% tax
-            $total = $subtotal + $shipping + $tax;
-            
-            // Return JSON response
-            header('Content-Type: application/json');
-            echo json_encode([
-                'success' => true,
-                'item_subtotal' => $item['price'] * $quantity,
-                'subtotal' => $subtotal,
-                'tax' => $tax,
-                'total' => $total
-            ]);
-            exit;
         }
-        // Redirect for non-AJAX requests
-        header('Location: index.php?page=cart');
+        
+        // Redirect back to cart
+        header("Location: index.php?page=cart");
+        exit;
+    } elseif ($action === 'clear') {
+        // Clear entire cart
+        unset($_SESSION['cart']);
+        
+        // Redirect back to cart
+        header("Location: index.php?page=cart");
         exit;
     }
 }
 
-// Calculate totals
+// Calculate cart totals
 $subtotal = 0;
-foreach ($_SESSION['cart'] as $item) {
-    $subtotal += $item['price'] * $item['quantity'];
-}
-$shipping = 250;
-$tax = round($subtotal * 0.12); // 12% tax
-$total = $subtotal + $shipping + $tax;
+$items_count = 0;
 
-// Handle coupon application
-$coupon_message = '';
-if (isset($_POST['apply_coupon']) && !empty($_POST['coupon_code'])) {
-    $coupon_code = $_POST['coupon_code'];
-    
-    // Check if coupon exists in database
-    $query = "SELECT * FROM coupons WHERE code = '$coupon_code' AND active = 1 AND expiry_date >= CURDATE()";
-    $result = mysqli_query($conn, $query);
-    
-    if (mysqli_num_rows($result) > 0) {
-        $coupon = mysqli_fetch_assoc($result);
-        $discount = $coupon['discount_amount'];
-        $total -= $discount;
-        $coupon_message = '<div class="alert alert-success">Coupon applied successfully! You saved ₱' . number_format($discount, 2) . '</div>';
-    } else {
-        $coupon_message = '<div class="alert alert-danger">Invalid or expired coupon code.</div>';
+if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
+    foreach ($_SESSION['cart'] as $item) {
+        $subtotal += $item['price'] * $item['quantity'];
+        $items_count += $item['quantity'];
     }
 }
 
-// Handle checkout
-if (isset($_POST['checkout']) && !empty($_SESSION['cart'])) {
-    // Redirect to checkout page
-    header('Location: index.php?page=checkout');
-    exit;
-}
+$shipping = 250; // Fixed shipping fee
+$tax = round($subtotal * 0.12); // 12% tax
+$total = $subtotal + $shipping + $tax;
 ?>
 
 <div class="container py-5">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h2">Shopping Cart</h1>
-        <a href="index.php" class="btn btn-outline-secondary">
-            <i class="fas fa-arrow-left me-2"></i>Continue Shopping
-        </a>
-    </div>
+    <h1 class="h2 mb-4">Shopping Cart</h1>
     
-    <?php if (!empty($_SESSION['cart'])): ?>
+    <?php if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])): ?>
+    <div class="text-center py-5 bg-white rounded shadow-sm">
+        <i class="fas fa-shopping-cart fa-4x text-muted mb-3"></i>
+        <h2 class="h4 mb-3">Your cart is empty</h2>
+        <p class="text-muted mb-4">Looks like you haven't added any items to your cart yet.</p>
+        <a href="index.php" class="btn btn-primary">Start Shopping</a>
+    </div>
+    <?php else: ?>
     <div class="row">
         <!-- Cart Items -->
-        <div class="col-lg-8 mb-4 mb-lg-0">
-            <div class="card">
+        <div class="col-lg-8">
+            <div class="card mb-4">
                 <div class="card-body">
                     <?php foreach ($_SESSION['cart'] as $item): ?>
-                    <div class="cart-item d-flex py-3 border-bottom">
-                        <!-- Product Image -->
-                        <div class="flex-shrink-0 me-3">
-                            <div style="width: 100px; height: 100px;" class="border rounded overflow-hidden">
-                                <img src="<?php echo $item['image']; ?>" class="img-fluid h-100 w-100 object-fit-cover" alt="<?php echo $item['title']; ?>">
+                    <div class="row mb-4 pb-4 border-bottom">
+                        <div class="col-md-3 mb-3 mb-md-0">
+                            <div class="bg-image rounded">
+                                <img src="<?php echo $item['image']; ?>" class="img-fluid rounded" alt="<?php echo $item['title']; ?>" style="height: 120px; object-fit: cover;">
                             </div>
                         </div>
-                        
-                        <!-- Product Details -->
-                        <div class="flex-grow-1">
-                            <h5 class="mb-1"><?php echo $item['title']; ?></h5>
-                            <p class="text-muted small mb-2">by <?php echo $item['artist']; ?></p>
-                            <p class="fw-medium mb-3">₱<?php echo number_format($item['price'], 2); ?></p>
+                        <div class="col-md-9">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h5 class="mb-1"><?php echo $item['title']; ?></h5>
+                                    <p class="text-muted mb-2 small">by <?php echo $item['artist']; ?></p>
+                                    <p class="mb-3 fw-bold">₱<?php echo number_format($item['price'], 2); ?></p>
+                                </div>
+                                <form method="POST" action="">
+                                    <input type="hidden" name="action" value="remove">
+                                    <input type="hidden" name="product_id" value="<?php echo $item['id']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to remove this item?')">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
                             
                             <div class="d-flex align-items-center">
-                                <!-- Quantity Controls -->
-                                <div class="input-group" style="width: 120px;">
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" 
-                                            onclick="updateQuantity(<?php echo $item['id']; ?>, <?php echo $item['quantity']; ?> - 1)" 
-                                            <?php echo ($item['quantity'] <= 1) ? 'disabled' : ''; ?>>
-                                        <i class="fas fa-minus"></i>
-                                    </button>
-                                    <input type="text" class="form-control form-control-sm text-center" 
-                                           value="<?php echo $item['quantity']; ?>" 
-                                           id="quantity-<?php echo $item['id']; ?>" 
-                                           onchange="updateQuantity(<?php echo $item['id']; ?>, this.value)">
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" 
-                                            onclick="updateQuantity(<?php echo $item['id']; ?>, <?php echo $item['quantity']; ?> + 1)">
-                                        <i class="fas fa-plus"></i>
-                                    </button>
-                                </div>
+                                <form method="POST" action="" class="d-flex align-items-center">
+                                    <input type="hidden" name="action" value="update">
+                                    <input type="hidden" name="product_id" value="<?php echo $item['id']; ?>">
+                                    <div class="d-flex align-items-center">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary quantity-decrease" onclick="decreaseQuantity('quantity-<?php echo $item['id']; ?>')">
+                                            <i class="fas fa-minus"></i>
+                                        </button>
+                                        <input type="number" name="quantity" id="quantity-<?php echo $item['id']; ?>" class="form-control form-control-sm mx-2" style="width: 60px;" value="<?php echo $item['quantity']; ?>" min="1">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary quantity-increase" onclick="increaseQuantity('quantity-<?php echo $item['id']; ?>')">
+                                            <i class="fas fa-plus"></i>
+                                        </button>
+                                    </div>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary ms-3">Update</button>
+                                </form>
                                 
-                                <!-- Subtotal -->
                                 <div class="ms-auto">
-                                    <span class="fw-bold" id="subtotal-<?php echo $item['id']; ?>">
-                                        ₱<?php echo number_format($item['price'] * $item['quantity'], 2); ?>
-                                    </span>
+                                    <span class="fw-bold">₱<?php echo number_format($item['price'] * $item['quantity'], 2); ?></span>
                                 </div>
-                                
-                                <!-- Remove Button -->
-                                <a href="index.php?page=cart&action=remove&id=<?php echo $item['id']; ?>" class="btn btn-link text-danger ms-3">
-                                    <i class="fas fa-trash"></i>
-                                </a>
                             </div>
                         </div>
                     </div>
                     <?php endforeach; ?>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="index.php" class="btn btn-outline-primary">
+                            <i class="fas fa-arrow-left me-2"></i>Continue Shopping
+                        </a>
+                        <form method="POST" action="">
+                            <input type="hidden" name="action" value="clear">
+                            <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Are you sure you want to clear your cart?')">
+                                <i class="fas fa-trash me-2"></i>Clear Cart
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
         
         <!-- Order Summary -->
         <div class="col-lg-4">
-            <div class="card sticky-top" style="top: 20px;">
+            <div class="card">
                 <div class="card-header bg-white">
                     <h5 class="mb-0">Order Summary</h5>
                 </div>
                 <div class="card-body">
                     <div class="d-flex justify-content-between mb-2">
                         <span class="text-muted">Subtotal</span>
-                        <span class="fw-medium" id="cart-subtotal">₱<?php echo number_format($subtotal, 2); ?></span>
+                        <span>₱<?php echo number_format($subtotal, 2); ?></span>
                     </div>
                     <div class="d-flex justify-content-between mb-2">
                         <span class="text-muted">Shipping</span>
-                        <span class="fw-medium">₱<?php echo number_format($shipping, 2); ?></span>
+                        <span>₱<?php echo number_format($shipping, 2); ?></span>
                     </div>
                     <div class="d-flex justify-content-between mb-3">
-                        <span class="text-muted">Tax</span>
-                        <span class="fw-medium" id="cart-tax">₱<?php echo number_format($tax, 2); ?></span>
+                        <span class="text-muted">Tax (12%)</span>
+                        <span>₱<?php echo number_format($tax, 2); ?></span>
                     </div>
                     
                     <hr>
                     
                     <div class="d-flex justify-content-between mb-4">
                         <span class="fw-bold">Total</span>
-                        <span class="fw-bold fs-5" id="cart-total">₱<?php echo number_format($total, 2); ?></span>
+                        <span class="fw-bold fs-5">₱<?php echo number_format($total, 2); ?></span>
                     </div>
-                    
-                    <!-- Coupon Code -->
-                    <form method="POST" action="" class="mb-3">
-                        <div class="input-group mb-2">
-                            <input type="text" class="form-control" name="coupon_code" placeholder="Coupon code">
-                            <button type="submit" name="apply_coupon" class="btn btn-outline-secondary">Apply</button>
-                        </div>
-                        <?php echo $coupon_message; ?>
-                    </form>
                     
                     <!-- Checkout Button -->
                     <a href="index.php?page=checkout" class="btn btn-primary w-100 py-2">Proceed to Checkout</a>
@@ -207,45 +222,21 @@ if (isset($_POST['checkout']) && !empty($_SESSION['cart'])) {
             </div>
         </div>
     </div>
-    <?php else: ?>
-    <!-- Empty Cart -->
-    <div class="text-center py-5 bg-white rounded shadow-sm">
-        <i class="fas fa-shopping-cart fa-4x text-muted mb-3"></i>
-        <h2 class="h4 mb-3">Your cart is empty</h2>
-        <p class="text-muted mb-4">Looks like you haven't added any items to your cart yet.</p>
-        <a href="index.php" class="btn btn-primary">
-            <i class="fas fa-arrow-left me-2"></i>Start Shopping
-        </a>
-    </div>
     <?php endif; ?>
 </div>
 
 <script>
-function updateQuantity(itemId, quantity) {
-    // Ensure quantity is at least 1
-    quantity = Math.max(1, parseInt(quantity));
-    
-    // Update input field
-    document.getElementById('quantity-' + itemId).value = quantity;
-    
-    // Send AJAX request to update cart
-    fetch(`index.php?page=cart&action=update&id=${itemId}&quantity=${quantity}&ajax=1`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                // Update item subtotal
-                document.getElementById('subtotal-' + itemId).textContent = '₱' + formatNumber(data.item_subtotal);
-                
-                // Update cart totals
-                document.getElementById('cart-subtotal').textContent = '₱' + formatNumber(data.subtotal);
-                document.getElementById('cart-tax').textContent = '₱' + formatNumber(data.tax);
-                document.getElementById('cart-total').textContent = '₱' + formatNumber(data.total);
-            }
-        })
-        .catch(error => console.error('Error updating cart:', error));
+function decreaseQuantity(inputId) {
+    const input = document.getElementById(inputId);
+    const currentValue = parseInt(input.value);
+    if (currentValue > 1) {
+        input.value = currentValue - 1;
+    }
 }
 
-function formatNumber(number) {
-    return new Intl.NumberFormat('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(number);
+function increaseQuantity(inputId) {
+    const input = document.getElementById(inputId);
+    const currentValue = parseInt(input.value);
+    input.value = currentValue + 1;
 }
 </script>

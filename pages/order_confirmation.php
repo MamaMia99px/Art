@@ -1,6 +1,6 @@
 <?php
 // Check if order ID is provided
-$order_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+$order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
 
 if ($order_id <= 0) {
     header('Location: index.php');
@@ -16,8 +16,10 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = $_SESSION['user_id'];
 
 // Fetch order details
-$order_query = "SELECT o.*, p.transaction_id, p.card_last_four 
+$order_query = "SELECT o.*, a.full_name, a.phone, a.address_line1, a.address_line2, a.city, a.province, a.postal_code, 
+               p.reference_number, p.account_number 
                FROM orders o 
+               JOIN user_addresses a ON o.shipping_address_id = a.id 
                LEFT JOIN payments p ON o.id = p.order_id 
                WHERE o.id = $order_id AND o.user_id = $user_id";
 $order_result = mysqli_query($conn, $order_query);
@@ -43,7 +45,7 @@ while ($item = mysqli_fetch_assoc($items_result)) {
 }
 
 // Format order date
-$order_date = new DateTime($order['order_date']);
+$order_date = new DateTime($order['created_at']);
 $formatted_date = $order_date->format('F j, Y');
 
 // Calculate estimated delivery date (5-7 days from order date)
@@ -69,8 +71,8 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
             <div class="card mb-4">
                 <div class="card-header bg-white">
                     <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Order #<?php echo $order_id; ?></h5>
-                        <span class="badge bg-primary"><?php echo ucfirst($order['order_status']); ?></span>
+                        <h5 class="mb-0">Order #<?php echo $order['order_number']; ?></h5>
+                        <span class="badge bg-primary"><?php echo ucfirst($order['status']); ?></span>
                     </div>
                 </div>
                 <div class="card-body">
@@ -89,25 +91,30 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
                         <div class="col-md-6 mb-3 mb-md-0">
                             <h6 class="text-muted mb-2">Shipping Address</h6>
                             <p class="mb-0">
-                                <?php echo $order['shipping_name']; ?><br>
-                                <?php echo $order['shipping_address']; ?><br>
-                                <?php echo $order['shipping_city']; ?>, <?php echo $order['shipping_province']; ?> <?php echo $order['shipping_postal_code']; ?><br>
-                                Phone: <?php echo $order['shipping_phone']; ?><br>
-                                Email: <?php echo $order['shipping_email']; ?>
+                                <?php echo $order['full_name']; ?><br>
+                                <?php echo $order['address_line1']; ?>
+                                <?php if (!empty($order['address_line2'])): ?>, <?php echo $order['address_line2']; ?><?php endif; ?><br>
+                                <?php echo $order['city']; ?>, <?php echo $order['province']; ?> <?php echo $order['postal_code']; ?><br>
+                                Phone: <?php echo $order['phone']; ?>
                             </p>
                         </div>
                         <div class="col-md-6">
                             <h6 class="text-muted mb-2">Payment Method</h6>
-                            <?php if ($order['payment_method'] === 'credit_card'): ?>
+                            <?php if ($order['payment_method'] === 'gcash'): ?>
                             <p class="mb-0">
-                                Credit Card (ending in <?php echo $order['card_last_four']; ?>)<br>
-                                Transaction ID: <?php echo $order['transaction_id']; ?><br>
+                                GCash<br>
+                                <?php if (!empty($order['account_number'])): ?>
+                                Account: <?php echo $order['account_number']; ?><br>
+                                <?php endif; ?>
+                                <?php if (!empty($order['reference_number'])): ?>
+                                Reference: <?php echo $order['reference_number']; ?><br>
+                                <?php endif; ?>
                                 Status: <span class="badge bg-success">Paid</span>
                             </p>
                             <?php else: ?>
                             <p class="mb-0">
                                 Cash on Delivery<br>
-                                Status: <span class="badge bg-warning text-dark">Pending</span>
+                                Status: <span class="badge bg-warning text-dark">Pay upon delivery</span>
                             </p>
                             <?php endif; ?>
                         </div>
@@ -174,7 +181,39 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
                     
                     <div class="d-flex justify-content-between">
                         <span class="fw-bold">Total</span>
-                        <span class="fw-bold">₱<?php echo number_format($order['total_amount'], 2); ?></span>
+                        <span class="fw-bold">₱<?php echo number_format($order['total'], 2); ?></span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- What's Next Section -->
+            <div class="card mb-4">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">What's Next?</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-4 mb-3 mb-md-0">
+                            <div class="mb-3">
+                                <i class="fas fa-clipboard-check fa-3x text-primary"></i>
+                            </div>
+                            <h6>Order Processing</h6>
+                            <p class="text-muted small">We're preparing your order for shipment.</p>
+                        </div>
+                        <div class="col-md-4 mb-3 mb-md-0">
+                            <div class="mb-3">
+                                <i class="fas fa-shipping-fast fa-3x text-primary"></i>
+                            </div>
+                            <h6>Shipping</h6>
+                            <p class="text-muted small">Your order will be shipped within 1-2 business days.</p>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <i class="fas fa-box-open fa-3x text-primary"></i>
+                            </div>
+                            <h6>Delivery</h6>
+                            <p class="text-muted small">Estimated delivery within 5-7 business days.</p>
+                        </div>
                     </div>
                 </div>
             </div>
