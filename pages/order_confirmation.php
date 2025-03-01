@@ -45,7 +45,7 @@ while ($item = mysqli_fetch_assoc($items_result)) {
 }
 
 // Format order date
-$order_date = new DateTime($order['created_at']);
+$order_date = new DateTime($order['order_date']);
 $formatted_date = $order_date->format('F j, Y');
 
 // Calculate estimated delivery date (5-7 days from order date)
@@ -54,6 +54,15 @@ $delivery_date->modify('+5 days');
 $delivery_end_date = clone $order_date;
 $delivery_end_date->modify('+7 days');
 $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->format('F j, Y');
+
+// Get order status history
+$history_query = "SELECT * FROM order_status_history WHERE order_id = $order_id ORDER BY created_at ASC";
+$history_result = mysqli_query($conn, $history_query);
+$status_history = [];
+
+while ($history = mysqli_fetch_assoc($history_result)) {
+    $status_history[] = $history;
+}
 ?>
 
 <div class="container py-5">
@@ -72,7 +81,7 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
                 <div class="card-header bg-white">
                     <div class="d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Order #<?php echo $order['order_number']; ?></h5>
-                        <span class="badge bg-primary"><?php echo ucfirst($order['status']); ?></span>
+                        <span class="badge <?php echo getStatusBadgeClass($order['status']); ?>"><?php echo ucfirst($order['status']); ?></span>
                     </div>
                 </div>
                 <div class="card-body">
@@ -102,7 +111,7 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
                             <h6 class="text-muted mb-2">Payment Method</h6>
                             <?php if ($order['payment_method'] === 'gcash'): ?>
                             <p class="mb-0">
-                                GCash<br>
+                                <strong>GCash</strong><br>
                                 <?php if (!empty($order['account_number'])): ?>
                                 Account: <?php echo $order['account_number']; ?><br>
                                 <?php endif; ?>
@@ -113,11 +122,76 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
                             </p>
                             <?php else: ?>
                             <p class="mb-0">
-                                Cash on Delivery<br>
+                                <strong>Cash on Delivery</strong><br>
+                                Amount to pay: ₱<?php echo number_format($order['total_amount'], 2); ?><br>
                                 Status: <span class="badge bg-warning text-dark">Pay upon delivery</span>
                             </p>
                             <?php endif; ?>
                         </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Order Status Timeline -->
+            <div class="card mb-4">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">Order Status</h5>
+                </div>
+                <div class="card-body">
+                    <div class="position-relative">
+                        <?php if (!empty($status_history)): ?>
+                            <?php foreach ($status_history as $index => $status): ?>
+                                <?php 
+                                    $status_date = new DateTime($status['created_at']);
+                                    $status_formatted_date = $status_date->format('M j, Y - g:i A');
+                                    $is_last = $index === count($status_history) - 1;
+                                ?>
+                                <div class="d-flex mb-3">
+                                    <div class="me-3 position-relative">
+                                        <div class="bg-primary rounded-circle" style="width: 12px; height: 12px; margin-top: 6px;"></div>
+                                        <?php if (!$is_last): ?>
+                                        <div class="position-absolute bg-primary" style="width: 2px; height: calc(100% + 12px); left: 5px; top: 12px;"></div>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div>
+                                        <div class="d-flex align-items-center mb-1">
+                                            <h6 class="mb-0 me-2"><?php echo ucfirst($status['status']); ?></h6>
+                                            <small class="text-muted"><?php echo $status_formatted_date; ?></small>
+                                        </div>
+                                        <p class="text-muted mb-0"><?php echo $status['notes']; ?></p>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="d-flex mb-3">
+                                <div class="me-3">
+                                    <div class="bg-primary rounded-circle" style="width: 12px; height: 12px; margin-top: 6px;"></div>
+                                </div>
+                                <div>
+                                    <div class="d-flex align-items-center mb-1">
+                                        <h6 class="mb-0 me-2"><?php echo ucfirst($order['status']); ?></h6>
+                                        <small class="text-muted"><?php echo $formatted_date; ?></small>
+                                    </div>
+                                    <p class="text-muted mb-0">Your order has been received.</p>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <!-- Next expected status for COD orders -->
+                        <?php if ($order['payment_method'] === 'cod' && $order['status'] === 'pending'): ?>
+                        <div class="d-flex mb-3">
+                            <div class="me-3 position-relative">
+                                <div class="bg-secondary rounded-circle" style="width: 12px; height: 12px; margin-top: 6px;"></div>
+                            </div>
+                            <div>
+                                <div class="d-flex align-items-center mb-1">
+                                    <h6 class="mb-0 me-2 text-muted">Processing</h6>
+                                    <small class="text-muted">Expected soon</small>
+                                </div>
+                                <p class="text-muted mb-0">Your order will be processed after payment is received.</p>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -181,7 +255,7 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
                     
                     <div class="d-flex justify-content-between">
                         <span class="fw-bold">Total</span>
-                        <span class="fw-bold">₱<?php echo number_format($order['total'], 2); ?></span>
+                        <span class="fw-bold">₱<?php echo number_format($order['total_amount'], 2); ?></span>
                     </div>
                 </div>
             </div>
@@ -193,27 +267,58 @@ $delivery_range = $delivery_date->format('F j') . ' - ' . $delivery_end_date->fo
                 </div>
                 <div class="card-body">
                     <div class="row text-center">
-                        <div class="col-md-4 mb-3 mb-md-0">
+                        <?php if ($order['payment_method'] === 'cod'): ?>
+                        <div class="col-md-3 mb-3 mb-md-0">
                             <div class="mb-3">
-                                <i class="fas fa-clipboard-check fa-3x text-primary"></i>
+                                <i class="fas fa-box-open fa-3x <?php echo $order['status'] === 'pending' ? 'text-primary' : 'text-muted'; ?>"></i>
+                            </div>
+                            <h6>Order Received</h6>
+                            <p class="text-muted small">We've received your order</p>
+                        </div>
+                        <div class="col-md-3 mb-3 mb-md-0">
+                            <div class="mb-3">
+                                <i class="fas fa-clipboard-check fa-3x text-muted"></i>
                             </div>
                             <h6>Order Processing</h6>
-                            <p class="text-muted small">We're preparing your order for shipment.</p>
+                            <p class="text-muted small">After payment confirmation</p>
+                        </div>
+                        <div class="col-md-3 mb-3 mb-md-0">
+                            <div class="mb-3">
+                                <i class="fas fa-shipping-fast fa-3x text-muted"></i>
+                            </div>
+                            <h6>Shipping</h6>
+                            <p class="text-muted small">Your order is on the way</p>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <i class="fas fa-hand-holding-usd fa-3x text-muted"></i>
+                            </div>
+                            <h6>Payment & Delivery</h6>
+                            <p class="text-muted small">Pay when you receive</p>
+                        </div>
+                        <?php else: ?>
+                        <div class="col-md-4 mb-3 mb-md-0">
+                            <div class="mb-3">
+                                <i class="fas fa-clipboard-check fa-3x <?php echo $order['status'] === 'processing' ? 'text-primary' : 'text-muted'; ?>"></i>
+                            </div>
+                            <h6>Order Processing</h6>
+                            <p class="text-muted small">We're preparing your order</p>
                         </div>
                         <div class="col-md-4 mb-3 mb-md-0">
                             <div class="mb-3">
-                                <i class="fas fa-shipping-fast fa-3x text-primary"></i>
+                                <i class="fas fa-shipping-fast fa-3x text-muted"></i>
                             </div>
                             <h6>Shipping</h6>
-                            <p class="text-muted small">Your order will be shipped within 1-2 business days.</p>
+                            <p class="text-muted small">Your order will be shipped soon</p>
                         </div>
                         <div class="col-md-4">
                             <div class="mb-3">
-                                <i class="fas fa-box-open fa-3x text-primary"></i>
+                                <i class="fas fa-box-open fa-3x text-muted"></i>
                             </div>
                             <h6>Delivery</h6>
-                            <p class="text-muted small">Estimated delivery within 5-7 business days.</p>
+                            <p class="text-muted small">Estimated in 5-7 days</p>
                         </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

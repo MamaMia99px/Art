@@ -53,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $full_name = trim($_POST['full_name']);
         $phone = trim($_POST['phone']);
         $address_line1 = trim($_POST['address_line1']);
-        $address_line2 = trim($_POST['address_line2']);
+        $address_line2 = trim($_POST['address_line2'] ?? '');
         $city = trim($_POST['city']);
         $province = trim($_POST['province']);
         $postal_code = trim($_POST['postal_code']);
@@ -88,6 +88,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             // Insert new address
+            $full_name = mysqli_real_escape_string($conn, $full_name);
+            $phone = mysqli_real_escape_string($conn, $phone);
+            $address_line1 = mysqli_real_escape_string($conn, $address_line1);
+            $address_line2 = mysqli_real_escape_string($conn, $address_line2);
+            $city = mysqli_real_escape_string($conn, $city);
+            $province = mysqli_real_escape_string($conn, $province);
+            $postal_code = mysqli_real_escape_string($conn, $postal_code);
+            
             $insert_query = "INSERT INTO user_addresses (user_id, full_name, phone, address_line1, address_line2, city, province, postal_code, is_default) 
                             VALUES ($user_id, '$full_name', '$phone', '$address_line1', '$address_line2', '$city', '$province', '$postal_code', $is_default)";
             
@@ -126,47 +134,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Generate order number
         $order_number = 'ORD-' . date('Ymd') . '-' . rand(1000, 9999);
         
-        // Insert order into database
-        $order_query = "INSERT INTO orders (user_id, order_number, shipping_address_id, payment_method, subtotal, shipping_fee, tax, total, status, created_at) 
-                        VALUES ($user_id, '$order_number', $shipping_address_id, '$payment_method', $subtotal, $shipping, $tax, $total, 'pending', NOW())";
+        // Get address details
+        $address_query = "SELECT * FROM user_addresses WHERE id = $shipping_address_id AND user_id = $user_id";
+        $address_result = mysqli_query($conn, $address_query);
+        $address = mysqli_fetch_assoc($address_result);
         
-        if (mysqli_query($conn, $order_query)) {
-            $order_id = mysqli_insert_id($conn);
-            
-            // Insert order items
-            foreach ($_SESSION['cart'] as $item) {
-                $product_id = $item['id'];
-                $quantity = $item['quantity'];
-                $price = $item['price'];
-                $item_total = $price * $quantity;
-                
-                $item_query = "INSERT INTO order_items (order_id, product_id, quantity, price, total) 
-                                VALUES ($order_id, $product_id, $quantity, $price, $item_total)";
-                mysqli_query($conn, $item_query);
-            }
-            
-            // If GCash payment, save payment details
-            if ($payment_method === 'gcash') {
-                $gcash_reference = mysqli_real_escape_string($conn, $_POST['gcash_reference']);
-                $gcash_number = mysqli_real_escape_string($conn, $_POST['gcash_number']);
-                
-                $payment_query = "INSERT INTO payments (order_id, payment_method, reference_number, account_number, amount, status) 
-                                VALUES ($order_id, 'gcash', '$gcash_reference', '$gcash_number', $total, 'completed')";
-                mysqli_query($conn, $payment_query);
-                
-                // Update order status to processing since payment is completed
-                $update_query = "UPDATE orders SET status = 'processing' WHERE id = $order_id";
-                mysqli_query($conn, $update_query);
-            }
-            
-            // Clear cart
-            unset($_SESSION['cart']);
-            
-            // Redirect to order confirmation page
-            header("Location: index.php?page=order_confirmation&order_id=$order_id");
-            exit;
+        if (!$address) {
+            $errors[] = 'Invalid shipping address';
         } else {
-            $errors[] = 'Failed to create order. Please try again.';
+            // Start transaction
+            mysqli_begin_transaction($conn);
+            
+            try {
+                // Insert order into database
+                $order_status = ($payment_method === 'cod') ? 'pending' : 'processing';
+                $payment_status = ($payment_method === 'cod') ? 'pending' : 'completed';
+                
+                $order_query = "INSERT INTO orders (user_id, order_number, order_date, shipping_address_id, payment_method, 
+                                subtotal, shipping_fee, tax, total_amount, status, payment_status) 
+                                VALUES ($user_id, '$order_number', NOW(), $shipping_address_id, '$payment_method', 
+                                $subtotal, $shipping, $tax, $total, '$order_status', '$payment_status')";
+                
+                if (mysqli_query($conn, $order_query)) {
+                    $order_id = mysqli_insert_id($conn);
+                    
+                    // Insert order items
+                    foreach ($_SESSION['cart'] as $item) {
+                        $product_id = $item['id'];
+                        $quantity = $item['quantity'];
+                        $price = $item['price'];
+                        $item_total = $price * $quantity;
+                        
+                        $item_query = "INSERT INTO order_items (order_id, product_id, quantity, price, subtotal) 
+                                        VALUES ($order_id, $product_id, $quantity, $price, $item_total)";
+                        mysqli_query($conn, $item_query);
+                        
+                        // Update product inventory (if applicable)
+                        $update_inventory = "UPDATE products SET stock = stock - $quantity WHERE id = $product_id AND stock >= $quantity";
+                        mysqli_query($conn, $update_inventory);
+                    }
+                    
+                    // Add initial status to history
+                    $status_note = ($payment_method === 'cod') ? 'Order received, awaiting payment on delivery.' : 'Order received and payment completed.';
+                    $history_query = "INSERT INTO order_status_history (order_id, status, notes, created_at) 
+                                    VALUES ($order_id, '$order_status', '$status_note', NOW())";
+                    mysqli_query($conn, $history_query);
+                    
+                    // If GCash payment, save payment details
+                    if ($payment_method === 'gcash') {
+                        $gcash_reference = mysqli_real_escape_string($conn, $_POST['gcash_reference']);
+                        $gcash_number = mysqli_real_escape_string($conn, $_POST['gcash_number']);
+                        
+                        $payment_query = "INSERT INTO payments (order_id, payment_method, reference_number, account_number, amount, status, created_at) 
+                                        VALUES ($order_id, 'gcash', '$gcash_reference', '$gcash_number', $total, 'completed', NOW())";
+                        mysqli_query($conn, $payment_query);
+                    }
+                    
+                    // Commit transaction
+                    mysqli_commit($conn);
+                    
+                    // Clear cart
+                    unset($_SESSION['cart']);
+                    
+                    // Redirect to order confirmation page
+                    header("Location: index.php?page=order_confirmation&order_id=$order_id");
+                    exit;
+                } else {
+                    throw new Exception("Failed to create order");
+                }
+            } catch (Exception $e) {
+                // Rollback transaction on error
+                mysqli_rollback($conn);
+                $errors[] = 'Failed to create order. Please try again. Error: ' . $e->getMessage();
+            }
         }
     }
 }
@@ -281,30 +321,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <h5 class="mb-0">Payment Method</h5>
                     </div>
                     <div class="card-body">
+                        <!-- Cash on Delivery Option -->
                         <div class="form-check mb-3 border p-3 rounded">
                             <input class="form-check-input" type="radio" name="payment_method" id="payment-cod" value="cod" checked>
                             <label class="form-check-label w-100" for="payment-cod">
                                 <div class="d-flex align-items-center">
+                                    <div class="me-3">
+                                        <i class="fas fa-money-bill-wave fa-2x text-success"></i>
+                                    </div>
                                     <div>
                                         <span class="fw-medium">Cash on Delivery</span>
                                         <div class="text-muted small">Pay when you receive your order</div>
                                     </div>
                                 </div>
+                                <div class="mt-2 p-2 bg-light rounded small">
+                                    <p class="mb-0"><i class="fas fa-info-circle me-1"></i> Our delivery partner will collect the payment when they deliver your order.</p>
+                                    <p class="mb-0 mt-1"><i class="fas fa-check-circle me-1 text-success"></i> No additional fees for Cash on Delivery</p>
+                                </div>
                             </label>
                         </div>
                         
+                        <!-- GCash Option -->
                         <div class="form-check mb-3 border p-3 rounded">
                             <input class="form-check-input" type="radio" name="payment_method" id="payment-gcash" value="gcash">
                             <label class="form-check-label w-100" for="payment-gcash">
                                 <div class="d-flex align-items-center">
+                                    <div class="me-3">
+                                        <img src="https://www.gcash.com/wp-content/uploads/2019/04/gcash-logo.png" alt="GCash" width="60">
+                                    </div>
                                     <div>
                                         <span class="fw-medium">GCash</span>
                                         <div class="text-muted small">Pay using your GCash account</div>
-                                        <div class="mt-2 p-2 bg-light rounded small">
-                                            <div><strong>GCash Number:</strong> 0917-123-4567</div>
-                                            <div><strong>Account Name:</strong> ArtiSell Inc.</div>
-                                        </div>
                                     </div>
+                                </div>
+                                <div class="mt-2 p-2 bg-light rounded small">
+                                    <div><strong>GCash Number:</strong> 0917-123-4567</div>
+                                    <div><strong>Account Name:</strong> ArtiSell Inc.</div>
                                 </div>
                             </label>
                         </div>

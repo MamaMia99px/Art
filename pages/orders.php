@@ -12,14 +12,17 @@ $user_id = $_SESSION['user_id'];
 $status_filter = isset($_GET['status']) ? $_GET['status'] : '';
 
 // Build query
-$query = "SELECT * FROM orders WHERE user_id = $user_id";
+$query = "SELECT o.*, COUNT(oi.id) as item_count, SUM(oi.quantity) as total_quantity 
+          FROM orders o 
+          LEFT JOIN order_items oi ON o.id = oi.order_id 
+          WHERE o.user_id = $user_id";
 
 if (!empty($status_filter)) {
     $status_filter = mysqli_real_escape_string($conn, $status_filter);
-    $query .= " AND order_status = '$status_filter'";
+    $query .= " AND o.status = '$status_filter'";
 }
 
-$query .= " ORDER BY order_date DESC";
+$query .= " GROUP BY o.id ORDER BY o.order_date DESC";
 
 // Execute query
 $result = mysqli_query($conn, $query);
@@ -32,17 +35,17 @@ if (mysqli_num_rows($result) > 0) {
 }
 
 // Get all possible order statuses for filter
-$statuses_query = "SELECT DISTINCT order_status FROM orders WHERE user_id = $user_id";
+$statuses_query = "SELECT DISTINCT status FROM orders WHERE user_id = $user_id";
 $statuses_result = mysqli_query($conn, $statuses_query);
 $statuses = [];
 
 if (mysqli_num_rows($statuses_result) > 0) {
     while ($status = mysqli_fetch_assoc($statuses_result)) {
-        $statuses[] = $status['order_status'];
+        $statuses[] = $status['status'];
     }
 } else {
     // Default statuses if none found
-    $statuses = ['processing', 'shipped', 'delivered', 'cancelled'];
+    $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
 }
 ?>
 
@@ -81,6 +84,7 @@ if (mysqli_num_rows($statuses_result) > 0) {
                             <th scope="col">Date</th>
                             <th scope="col">Items</th>
                             <th scope="col">Total</th>
+                            <th scope="col">Payment</th>
                             <th scope="col">Status</th>
                             <th scope="col" class="text-end pe-4">Actions</th>
                         </tr>
@@ -88,46 +92,27 @@ if (mysqli_num_rows($statuses_result) > 0) {
                     <tbody>
                         <?php foreach ($orders as $order): ?>
                         <?php 
-                            // Get order items count
-                            $items_query = "SELECT COUNT(*) as count, SUM(quantity) as total_quantity FROM order_items WHERE order_id = {$order['id']}";
-                            $items_result = mysqli_query($conn, $items_query);
-                            $items_data = mysqli_fetch_assoc($items_result);
-                            $item_count = $items_data['count'];
-                            $total_quantity = $items_data['total_quantity'];
-                            
                             // Format date
                             $order_date = new DateTime($order['order_date']);
                             $formatted_date = $order_date->format('M j, Y');
                         ?>
                         <tr>
-                            <td class="ps-4">#<?php echo $order['id']; ?></td>
+                            <td class="ps-4"><?php echo $order['order_number']; ?></td>
                             <td><?php echo $formatted_date; ?></td>
-                            <td><?php echo $total_quantity; ?> item<?php echo $total_quantity !== 1 ? 's' : ''; ?></td>
+                            <td><?php echo $order['total_quantity']; ?> item<?php echo $order['total_quantity'] !== '1' ? 's' : ''; ?></td>
                             <td>₱<?php echo number_format($order['total_amount'], 2); ?></td>
                             <td>
-                                <?php 
-                                    $status_class = '';
-                                    switch ($order['order_status']) {
-                                        case 'processing':
-                                            $status_class = 'bg-info text-dark';
-                                            break;
-                                        case 'shipped':
-                                            $status_class = 'bg-primary';
-                                            break;
-                                        case 'delivered':
-                                            $status_class = 'bg-success';
-                                            break;
-                                        case 'cancelled':
-                                            $status_class = 'bg-danger';
-                                            break;
-                                        default:
-                                            $status_class = 'bg-secondary';
-                                    }
-                                ?>
-                                <span class="badge <?php echo $status_class; ?>"><?php echo ucfirst($order['order_status']); ?></span>
+                                <?php if ($order['payment_method'] === 'cod'): ?>
+                                <span class="badge bg-warning text-dark">COD</span>
+                                <?php else: ?>
+                                <span class="badge bg-success">GCash</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <span class="badge <?php echo getStatusBadgeClass($order['status']); ?>"><?php echo ucfirst($order['status']); ?></span>
                             </td>
                             <td class="text-end pe-4">
-                                <a href="index.php?page=order_detail&id=<?php echo $order['id']; ?>" class="btn btn-sm btn-outline-primary">View Details</a>
+                                <a href="index.php?page=order_detail&order_id=<?php echo $order['id']; ?>" class="btn btn-sm btn-outline-primary">View Details</a>
                             </td>
                         </tr>
                         <?php endforeach; ?>
