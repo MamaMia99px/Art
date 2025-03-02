@@ -1,76 +1,37 @@
 <?php
-// Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+/**
+ * General functions for the ArtiSell platform
+ */
 
-// Function to sanitize input data
-function sanitize($data) {
-    global $conn;
-    return mysqli_real_escape_string($conn, trim($data));
-}
-
-// Function to check if user is logged in
+/**
+ * Check if user is logged in
+ * 
+ * @return bool True if logged in, false otherwise
+ */
 function isLoggedIn() {
-    return isset($_SESSION['user_id']);
+    return isset($_SESSION['user_id']) && !empty($_SESSION['user_id']);
 }
 
-// Function to redirect user
-function redirect($url) {
-    header("Location: $url");
-    exit;
+/**
+ * Format price with currency symbol
+ * 
+ * @param float $price Price to format
+ * @return string Formatted price
+ */
+function formatPrice($price) {
+    return '₱' . number_format($price, 2);
 }
 
-// Function to display error message
-function displayError($message) {
-    return "<div class='alert alert-danger'>$message</div>";
-}
-
-// Function to display success message
-function displaySuccess($message) {
-    return "<div class='alert alert-success'>$message</div>";
-}
-
-// Function to get user details
-function getUserDetails($user_id) {
-    global $conn;
-    $query = "SELECT * FROM users WHERE id = $user_id";
-    $result = mysqli_query($conn, $query);
-    return mysqli_fetch_assoc($result);
-}
-
-// Function to get product details
-function getProductDetails($product_id) {
-    global $conn;
-    $query = "SELECT p.*, c.name as category_name, a.name as artist_name, a.location as artist_location 
-              FROM products p 
-              JOIN categories c ON p.category_id = c.id 
-              JOIN artists a ON p.artist_id = a.id 
-              WHERE p.id = $product_id";
-    $result = mysqli_query($conn, $query);
-    return mysqli_fetch_assoc($result);
-}
-
-// Function to get product images
-function getProductImages($product_id) {
-    global $conn;
-    $query = "SELECT * FROM product_images WHERE product_id = $product_id ORDER BY is_primary DESC";
-    $result = mysqli_query($conn, $query);
-    $images = [];
-    while ($row = mysqli_fetch_assoc($result)) {
-        $images[] = $row;
-    }
-    return $images;
-}
-
-// Function to format currency
-function formatCurrency($amount) {
-    return '₱' . number_format($amount, 2);
-}
-
-// Function to get order status badge class
+/**
+ * Get CSS class for order status badge
+ * 
+ * @param string $status Order status
+ * @return string CSS class for the badge
+ */
 function getStatusBadgeClass($status) {
     switch ($status) {
+        case 'pending':
+            return 'bg-warning text-dark';
         case 'processing':
             return 'bg-info text-dark';
         case 'shipped':
@@ -84,82 +45,160 @@ function getStatusBadgeClass($status) {
     }
 }
 
-// Function to add item to cart
-function addToCart($product_id, $quantity = 1) {
+/**
+ * Get categories from database
+ * 
+ * @param int $limit Optional limit for number of categories
+ * @return array Array of category data
+ */
+function getCategories($limit = 0) {
     global $conn;
     
-    // Get product details
-    $product = getProductDetails($product_id);
+    $query = "SELECT * FROM categories ORDER BY name ASC";
     
-    if (!$product) {
-        return false;
+    if ($limit > 0) {
+        $query .= " LIMIT $limit";
     }
     
-    // Initialize cart if not exists
-    if (!isset($_SESSION['cart'])) {
-        $_SESSION['cart'] = [];
-    }
+    $result = mysqli_query($conn, $query);
+    $categories = [];
     
-    // Check if product already in cart
-    $found = false;
-    foreach ($_SESSION['cart'] as $key => $item) {
-        if ($item['id'] == $product_id) {
-            $_SESSION['cart'][$key]['quantity'] += $quantity;
-            $found = true;
-            break;
+    if (mysqli_num_rows($result) > 0) {
+        while ($row = mysqli_fetch_assoc($result)) {
+            $categories[] = $row;
         }
     }
     
-    // If product not in cart, add it
-    if (!$found) {
-        $_SESSION['cart'][] = [
-            'id' => $product_id,
-            'title' => $product['title'],
-            'price' => $product['price'],
-            'image' => $product['image'],
-            'artist' => $product['artist_name'],
-            'quantity' => $quantity
-        ];
-    }
-    
-    return true;
+    return $categories;
 }
 
-// Function to update cart item quantity
-function updateCartQuantity($product_id, $quantity) {
-    if ($quantity < 1) {
-        return false;
+/**
+ * Get featured products
+ * 
+ * @param int $limit Optional limit for number of products
+ * @return array Array of product data
+ */
+function getFeaturedProducts($limit = 8) {
+    global $conn;
+    
+    $query = "SELECT p.*, c.name as category_name, a.name as artist_name 
+              FROM products p 
+              JOIN categories c ON p.category_id = c.id 
+              JOIN artists a ON p.artist_id = a.id 
+              WHERE p.is_featured = 1 
+              ORDER BY p.created_at DESC 
+              LIMIT $limit";
+    
+    $result = mysqli_query($conn, $query);
+    $products = [];
+    
+    if (mysqli_num_rows($result) > 0) {
+        while ($row = mysqli_fetch_assoc($result)) {
+            $products[] = $row;
+        }
     }
     
-    foreach ($_SESSION['cart'] as $key => $item) {
-        if ($item['id'] == $product_id) {
-            $_SESSION['cart'][$key]['quantity'] = $quantity;
-            return true;
+    return $products;
+}
+
+/**
+ * Get featured artists
+ * 
+ * @param int $limit Optional limit for number of artists
+ * @return array Array of artist data
+ */
+function getFeaturedArtists($limit = 3) {
+    global $conn;
+    
+    $query = "SELECT a.*, 
+              (SELECT COUNT(*) FROM products WHERE artist_id = a.id) as product_count,
+              (SELECT image FROM products WHERE artist_id = a.id ORDER BY created_at DESC LIMIT 1) as work_sample
+              FROM artists a 
+              WHERE a.is_featured = 1 
+              ORDER BY a.name ASC 
+              LIMIT $limit";
+    
+    $result = mysqli_query($conn, $query);
+    $artists = [];
+    
+    if (mysqli_num_rows($result) > 0) {
+        while ($row = mysqli_fetch_assoc($result)) {
+            $artists[] = $row;
         }
+    }
+    
+    return $artists;
+}
+
+/**
+ * Get product details by ID
+ * 
+ * @param int $product_id Product ID
+ * @return array|bool Product data or false if not found
+ */
+function getProductById($product_id) {
+    global $conn;
+    
+    $product_id = intval($product_id);
+    
+    $query = "SELECT p.*, c.name as category_name, a.name as artist_name, a.id as artist_id, a.location as artist_location 
+              FROM products p 
+              JOIN categories c ON p.category_id = c.id 
+              JOIN artists a ON p.artist_id = a.id 
+              WHERE p.id = $product_id";
+    
+    $result = mysqli_query($conn, $query);
+    
+    if (mysqli_num_rows($result) > 0) {
+        return mysqli_fetch_assoc($result);
     }
     
     return false;
 }
 
-// Function to remove item from cart
-function removeFromCart($product_id) {
-    foreach ($_SESSION['cart'] as $key => $item) {
-        if ($item['id'] == $product_id) {
-            unset($_SESSION['cart'][$key]);
-            $_SESSION['cart'] = array_values($_SESSION['cart']); // Re-index array
-            return true;
+/**
+ * Get related products
+ * 
+ * @param int $product_id Current product ID
+ * @param int $category_id Category ID for related products
+ * @param int $limit Optional limit for number of products
+ * @return array Array of related product data
+ */
+function getRelatedProducts($product_id, $category_id, $limit = 4) {
+    global $conn;
+    
+    $product_id = intval($product_id);
+    $category_id = intval($category_id);
+    
+    $query = "SELECT p.*, a.name as artist_name 
+              FROM products p 
+              JOIN artists a ON p.artist_id = a.id 
+              WHERE p.category_id = $category_id AND p.id != $product_id 
+              ORDER BY RAND() 
+              LIMIT $limit";
+    
+    $result = mysqli_query($conn, $query);
+    $products = [];
+    
+    if (mysqli_num_rows($result) > 0) {
+        while ($row = mysqli_fetch_assoc($result)) {
+            $products[] = $row;
         }
     }
     
-    return false;
+    return $products;
 }
 
-// Function to calculate cart totals
+/**
+ * Calculate cart totals
+ * 
+ * @return array Array with subtotal, shipping, tax, and total
+ */
 function calculateCartTotals() {
     $subtotal = 0;
     $items_count = 0;
     
-    if (isset($_SESSION['cart'])) {
+    if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
         foreach ($_SESSION['cart'] as $item) {
             $subtotal += $item['price'] * $item['quantity'];
             $items_count += $item['quantity'];
@@ -178,88 +217,3 @@ function calculateCartTotals() {
         'items_count' => $items_count
     ];
 }
-
-// Function to clear cart
-function clearCart() {
-    unset($_SESSION['cart']);
-}
-
-// Function to create order
-function createOrder($user_id, $shipping_info, $payment_method) {
-    global $conn;
-    
-    // Calculate totals
-    $totals = calculateCartTotals();
-    
-    // Start transaction
-    mysqli_begin_transaction($conn);
-    
-    try {
-        // Insert order
-        $shipping_name = sanitize($shipping_info['name']);
-        $shipping_address = sanitize($shipping_info['address']);
-        $shipping_city = sanitize($shipping_info['city']);
-        $shipping_province = sanitize($shipping_info['province']);
-        $shipping_postal_code = sanitize($shipping_info['postal_code']);
-        $shipping_phone = sanitize($shipping_info['phone']);
-        $shipping_email = sanitize($shipping_info['email']);
-        
-        $payment_status = ($payment_method === 'cod') ? 'pending' : 'paid';
-        $order_status = 'processing';
-        
-        $query = "INSERT INTO orders (user_id, order_date, subtotal, shipping_fee, tax, total_amount, 
-                  shipping_name, shipping_address, shipping_city, shipping_province, shipping_postal_code, 
-                  shipping_phone, shipping_email, payment_method, payment_status, order_status) 
-                  VALUES ($user_id, NOW(), {$totals['subtotal']}, {$totals['shipping']}, {$totals['tax']}, 
-                  {$totals['total']}, '$shipping_name', '$shipping_address', '$shipping_city', 
-                  '$shipping_province', '$shipping_postal_code', '$shipping_phone', '$shipping_email', 
-                  '$payment_method', '$payment_status', '$order_status')";
-        
-        mysqli_query($conn, $query);
-        $order_id = mysqli_insert_id($conn);
-        
-        // Insert order items
-        foreach ($_SESSION['cart'] as $item) {
-            $product_id = $item['id'];
-            $quantity = $item['quantity'];
-            $price = $item['price'];
-            $subtotal = $price * $quantity;
-            
-            $query = "INSERT INTO order_items (order_id, product_id, quantity, price, subtotal) 
-                      VALUES ($order_id, $product_id, $quantity, $price, $subtotal)";
-            mysqli_query($conn, $query);
-            
-            // Update product stock
-            $query = "UPDATE products SET stock = stock - $quantity WHERE id = $product_id AND stock >= $quantity";
-            mysqli_query($conn, $query);
-        }
-        
-        // Add initial status to history
-        $query = "INSERT INTO order_status_history (order_id, status, notes, created_at) 
-                  VALUES ($order_id, 'processing', 'Order received and is being processed.', NOW())";
-        mysqli_query($conn, $query);
-        
-        // If payment method is credit card, add payment record
-        if ($payment_method === 'credit_card' && isset($shipping_info['card_last_four'])) {
-            $last_four = sanitize($shipping_info['card_last_four']);
-            $transaction_id = 'TXN-' . strtoupper(substr(md5(uniqid()), 0, 10));
-            
-            $query = "INSERT INTO payments (order_id, payment_method, amount, status, transaction_id, card_last_four, created_at) 
-                      VALUES ($order_id, 'credit_card', {$totals['total']}, 'completed', '$transaction_id', '$last_four', NOW())";
-            mysqli_query($conn, $query);
-        }
-        
-        // Commit transaction
-        mysqli_commit($conn);
-        
-        // Clear cart
-        clearCart();
-        
-        return $order_id;
-    } catch (Exception $e) {
-        // Rollback transaction on error
-        mysqli_rollback($conn);
-        return false;
-    }
-}
-?>

@@ -1,12 +1,14 @@
 <?php
-// Start session
 session_start();
+require_once 'includes/db_connection.php';
+require_once 'includes/functions.php';
+require_once 'includes/buy_now_functions.php';
+
+// Get page from URL parameter
+$page = isset($_GET['page']) ? $_GET['page'] : 'home';
 
 // Include header
-require_once 'includes/header.php';
-
-// Get current page from URL parameter
-$page = isset($_GET['page']) ? $_GET['page'] : 'home';
+include 'includes/header.php';
 
 // Load appropriate page content
 switch ($page) {
@@ -61,5 +63,5 @@ switch ($page) {
 }
 
 // Include footer
-require_once 'includes/footer.php';
+include 'includes/footer.php';
 ?>
